@@ -1,0 +1,194 @@
+import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getRiderByPhone } from "./AuthApi";
+const API_BASE_URL = "https://ridodrop-backend-24-10-2025.onrender.com/api/v1";
+export const getBookings = async (latitude, longitude, phoneNumber) => {
+  try {
+    // Add parameter validation
+    console.log("🔍 getBookings called with params:", {
+      latitude,
+      longitude,
+      phoneNumber,
+    });
+
+    if (!latitude || !longitude || !phoneNumber) {
+      const missing = [];
+      if (!latitude) missing.push("latitude");
+      if (!longitude) missing.push("longitude");
+      if (!phoneNumber) missing.push("phoneNumber");
+      throw new Error(`Missing required parameters: ${missing.join(", ")}`);
+    }
+
+    const requestBody = {
+      latitude,
+      longitude,
+      number: phoneNumber, // Backend expects 'number' field
+    };
+
+    console.log("📤 API Request Body:", JSON.stringify(requestBody, null, 2));
+    console.log("📤 API URL:", `${API_BASE_URL}/get/bookings`);
+
+    const response = await fetch(`${API_BASE_URL}/get/bookings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    console.log("📥 Response Status:", response.status);
+    console.log("📥 Response OK:", response.ok);
+
+    const data = await response.json();
+    console.log("📥 getBookings API response:", JSON.stringify(data, null, 2));
+
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to fetch bookings");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("❌ getBookings error:", error);
+    console.error("❌ Error details:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+};
+
+export const getRiderDetails = async (vehicleType) => {
+  try {
+    const response = await axios.post(
+      "https://ridodrop-backend-24-10-2025.onrender.com/api/v1/riders/get/rider",
+      {
+        vehicleType,
+      }
+    );
+    return response.data;
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const assignOrder = async (bookingId, driverId, status) => {
+  try {
+    const response = await axios.post(
+      "https://ridodrop-backend-24-10-2025.onrender.com/api/v1/assign-order",
+      {
+        bookingId,
+        driverId,
+        status,
+      }
+    );
+    return response.data;
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getOngoingBookingForRider = async ({ riderId }) => {
+  try {
+    console.log("🔍 getOngoingBookingForRider called with riderId:", riderId);
+
+    const phone = await AsyncStorage.getItem("number");
+    console.log("📞 Phone from storage:", phone);
+
+    // If riderId is not provided, get it from the rider data
+    let finalRiderId = riderId;
+    if (!finalRiderId) {
+      console.log("🔍 No riderId provided, fetching from rider data...");
+      try {
+        const riderData = await getRiderByPhone();
+        finalRiderId = riderData?._id || riderData?.id || riderData?.rider?._id;
+        console.log("👤 Retrieved riderId from rider data:", finalRiderId);
+      } catch (riderErr) {
+        console.log("❌ Error getting rider data:", riderErr.message);
+      }
+    }
+
+    let query = "";
+    if (finalRiderId) {
+      query = `?riderId=${encodeURIComponent(finalRiderId)}`;
+      console.log("🔗 Using riderId query:", query);
+    } else if (phone) {
+      query = `?phone=${encodeURIComponent(phone)}`;
+      console.log("🔗 Using phone query:", query);
+    } else {
+      throw new Error("No rider ID or phone available");
+    }
+
+    const url = `${API_BASE_URL}/ongoing-booking${query}`;
+    console.log("📤 Making request to:", url);
+
+    // Use fetch instead of axios for better error handling
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    console.log("📥 Response status:", response.status);
+    console.log("📥 Response ok:", response.ok);
+
+    if (response.status === 404) {
+      console.log("ℹ️ No ongoing booking found (404)");
+      return null;
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ API error response:", errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log("✅ Ongoing booking response data:", {
+      bookingId: data._id,
+      status: data.status,
+      hasCustomer: !!data.customer,
+      customerName: data.customer?.name || "No name",
+      customerPhone: data.customer?.phone || "No phone",
+      fromAddress: data.fromAddress?.street || "No address",
+      dropLocation: data.dropLocation?.[0]?.street || "No drop",
+    });
+
+    return data;
+  } catch (err) {
+    console.error("❌ Error getting ongoing booking:", err);
+
+    // More detailed error logging
+    if (err.name === "TypeError" && err.message.includes("fetch")) {
+      console.error("📡 Network error - check internet connection");
+    } else if (err.message.includes("JSON")) {
+      console.error("� JSON parsing error - API returned non-JSON response");
+    } else if (err.message.includes("API error")) {
+      console.error("🚫 API returned error status");
+    } else {
+      console.error("⚙️ Unexpected error:", err.message);
+    }
+
+    throw err;
+  }
+};
+
+export const updateBookingStep = async (bookingId, currentStep) => {
+  console.log(bookingId, currentStep, "e3e3333333333333333333333");
+  const res = await axios.patch(
+    `https://ridodrop-backend-24-10-2025.onrender.com/api/v1/update-step/${bookingId}`,
+    { currentStep }
+  );
+
+  console.log(res.data);
+  return res.data;
+};
+
+export const completeBooking = async (bookingId) => {
+  const res = await axios.patch(
+    `https://ridodrop-backend-24-10-2025.onrender.com/api/v1/complete/${bookingId}`
+  );
+
+  return res.data;
+};
+
